@@ -1,9 +1,6 @@
-import os
-import requests
 import pandas as pd
 import streamlit as st
-from langchain_community.llms import LlamaCpp
-from langchain.prompts.prompt import PromptTemplate
+from transformers import AutoModelForCausalLM, pipeline
 from langchain.sql_database import SQLDatabase
 from sqlalchemy import create_engine
 
@@ -20,17 +17,13 @@ def main():
         table_info = get_table_info()
 
         # Define the SQL prompt template
-        template = """
+        template = f"""
         {table_info}
         {question}
         """
 
-        # Create the prompt with the query
-        prompt = PromptTemplate.from_template(template)
-        prompt_text = prompt.format(table_info=table_info, question=question)
-
-        # Get SQL query from LLM
-        sql_query = get_sql_query(prompt_text)
+        # Get SQL query from LLM using Hugging Face transformer
+        sql_query = get_sql_query(template)
 
         # Run SQL query and fetch result
         with engine.connect() as connection:
@@ -42,11 +35,13 @@ def main():
         st.write(result)
 
 def get_sql_query(prompt_text):
-    model_file = "https://huggingface.co/omeryentur/phi-3-sql/resolve/main/phi-3-sql.Q4_K_M.gguf"
-    client = LlamaCpp(model_path=model_file, temperature=0)
+    # Load Hugging Face transformer model
+    model = AutoModelForCausalLM.from_pretrained("omeryentur/phi-3-sql")
+    generator = pipeline(task="text-generation", model=model, device=0)
 
-    res = client(prompt_text)
-    sql_query = res.strip()
+    # Generate SQL query using Hugging Face model
+    response = generator(prompt_text, max_length=1024, num_return_sequences=1, no_repeat_ngram_size=3)
+    sql_query = response[0]["generated_text"].strip()
     return sql_query
 
 def get_table_info():
@@ -59,6 +54,7 @@ def get_table_info():
 
 def display_tables_and_contents():
     db_path = "sqlite:///example.db"
+    global engine 
     engine = create_engine(db_path)
     db = SQLDatabase.from_uri(database_uri=db_path)
     table_names = db.get_table_names()
