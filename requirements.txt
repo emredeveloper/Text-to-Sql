@@ -1,0 +1,4 @@
+streamlit
+langchain
+llama-cpp-python
+sqlite-utils
