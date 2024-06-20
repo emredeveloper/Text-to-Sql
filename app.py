@@ -41,11 +41,11 @@ def main():
     st.title("SQL Query Interface")
 
     # Input for Google API key
-    api_key = st.text_input("Enter your Google API key:", type="password")
+    
 
-    if api_key:
+    if True:
         # Initialize Google Generative AI model with the provided key
-        llm = ChatGoogleGenerativeAI(google_api_key=api_key, model="gemini-pro")
+        
 
         # Display tables and contents upon page load
         display_tables_and_contents()
