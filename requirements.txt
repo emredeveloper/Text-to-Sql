@@ -3,3 +3,6 @@ langchain
 llama-cpp-python
 sqlite-utils
 langchain_community
+tqdm
+
+
