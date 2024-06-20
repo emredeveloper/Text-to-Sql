@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 import streamlit as st
 from langchain_community.llms import LlamaCpp
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts.prompt import PromptTemplate
 from langchain.sql_database import SQLDatabase
 from sqlalchemy import create_engine
