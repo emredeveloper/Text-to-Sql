@@ -1,1 +1,1 @@
-# Text-to-Sql
+Bu projede, langchain aracılığıyla bir SQLite veritabanındaki tablolar üzerinde çalışarak kullanıcıdan alınan doğal dildeki bir sorguyu SQL sorgusuna dönüştürüp çalıştırabilmek amaçlanıyor. Kullanıcı, veritabanında bulunan tablolarla ilgili İngilizce sorgular girebilir ve bu sorgulara uygun SQL sorguları alarak veritabanındaki sonuçları elde edebilir.
