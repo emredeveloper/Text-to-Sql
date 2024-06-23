@@ -34,7 +34,6 @@ def load_model(model_file):
         return None
 
 # Cache the database connection
-@st.cache_resource(ttl=3600)
 def get_database():
     try:
         db_path = "sqlite:///example.db"
@@ -47,7 +46,6 @@ def get_database():
         return None, None
 
 # Cache the table names retrieval
-@st.cache(ttl=600)
 def get_table_names(db):
     return db.get_table_names()
 
