@@ -122,8 +122,8 @@ def main():
 
         question = st.text_area("Enter your query:", value="Courses containing Introduction")
         if st.button("Query"):
-            model_file = "phi-3-sql.Q4_K_M.gguf"
-            model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_file}"
+            model_file = "sqlcoder.Q2_K.gguf"
+            model_url = f"https://huggingface.co/TheBloke/sqlcoder-GGUF/resolve/main/{model_file}"
             expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
 
             # Download the model file if it doesn't exist
