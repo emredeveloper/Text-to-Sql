@@ -1,53 +1,25 @@
 import os
 import requests
-import hashlib
 import pandas as pd
 import streamlit as st
-from concurrent.futures import ThreadPoolExecutor
 from langchain_community.llms import LlamaCpp
 from langchain.prompts.prompt import PromptTemplate
 from langchain.sql_database import SQLDatabase
 from sqlalchemy import create_engine
 
-def calculate_md5(file_path):
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
-
-def download_file_in_chunks(url, filename, expected_md5, num_chunks=8):
+def download_file(url, filename):
     try:
-        response = requests.head(url)
-        file_size = int(response.headers['content-length'])
-        chunk_size = file_size // num_chunks
-
-        def download_chunk(chunk_index):
-            start = chunk_index * chunk_size
-            end = start + chunk_size - 1 if chunk_index < num_chunks - 1 else file_size - 1
-            headers = {'Range': f'bytes={start}-{end}'}
-            chunk_response = requests.get(url, headers=headers, stream=True)
-            chunk_filename = f"{filename}.part{chunk_index}"
-            with open(chunk_filename, 'wb') as f:
-                for chunk in chunk_response.iter_content(chunk_size=1024):
+        with requests.get(url, stream=True) as r:
+            total_length = int(r.headers.get('content-length', 0))
+            with open(filename, 'wb') as f:
+                downloaded = 0
+                for chunk in r.iter_content(chunk_size=1024):
                     if chunk:
                         f.write(chunk)
-            return chunk_filename
-
-        with ThreadPoolExecutor(max_workers=num_chunks) as executor:
-            chunk_files = list(executor.map(download_chunk, range(num_chunks)))
-
-        with open(filename, 'wb') as output_file:
-            for chunk_filename in chunk_files:
-                with open(chunk_filename, 'rb') as chunk_file:
-                    output_file.write(chunk_file.read())
-                os.remove(chunk_filename)
-
-        if calculate_md5(filename) != expected_md5:
-            st.error("Downloaded file is corrupted. Please try again.")
-            os.remove(filename)
-        else:
-            st.success("Download complete and verified!")
+                        downloaded += len(chunk)
+                        progress = downloaded / total_length
+                        st.progress(progress)
+        st.success("Download complete!")
     except Exception as e:
         st.error(f"Error downloading file: {e}")
 
@@ -117,12 +89,11 @@ def main():
         if st.button("Query"):
             model_file = "phi-3-sql.Q4_K_M.gguf"
             model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_file}"
-            expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
 
             # Download the model file if it doesn't exist
             if not os.path.exists(model_file):
                 st.write(f"Downloading {model_file}...")
-                download_file_in_chunks(model_url, model_file, expected_md5)
+                download_file(model_url, model_file)
 
             # Load the model
             client = load_model(model_file)
