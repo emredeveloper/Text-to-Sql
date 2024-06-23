@@ -7,7 +7,7 @@ from langchain.prompts.prompt import PromptTemplate
 from langchain.sql_database import SQLDatabase
 from sqlalchemy import create_engine
 
-
+# Function to download the model file with progress
 def download_file(url, filename):
     with requests.get(url, stream=True) as r:
         total_length = int(r.headers.get('content-length', 0))
@@ -27,24 +27,15 @@ model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_fi
 if not os.path.exists(model_file):
     st.write(f"Downloading {model_file}...")
     download_file(model_url, model_file)
-    
-    
-    
 
 # Initialize LLM and SQL database
-
-@st.cache_resource
-def model():
-    client = LlamaCpp(model_path=model_file, temperature=0)
-    return client
-
-client=model()
+client = LlamaCpp(model_path=model_file, temperature=0)
 db_path = "sqlite:///example.db"
 db = SQLDatabase.from_uri(database_uri=db_path)
 db._sample_rows_in_table_info = 0
 engine = create_engine(db_path)
 
-
+# Streamlit app interface
 def main():
     st.title("SQL Query Interface")
 
@@ -61,14 +52,10 @@ def main():
         table_info = db.get_table_info()
 
         # Define the SQL prompt template
-        template ="""
-        <|system|>
+        template = """
         {table_info}
-
-        <|user|>
         {question}
-
-        <|sql|>"""
+        """
 
         # Create the prompt with the query
         prompt = PromptTemplate.from_template(template)
@@ -78,13 +65,15 @@ def main():
         res = client(prompt_text)
         sql_query = res.strip()
         print(prompt_text)
+
+        # Run SQL query and fetch result
         with engine.connect() as connection:
-            df = pd.read_sql_query(sql_query, connection)
+            result = pd.read_sql_query(sql_query, connection)
 
-
+        # Display result in Streamlit app
         st.write(f"SQL Query: {sql_query}")
         st.write("Result:")
-        st.write(df)
+        st.write(result)
     else:
         st.write("Please enter your Google API key to proceed.")
 
