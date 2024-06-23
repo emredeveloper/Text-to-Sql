@@ -1,5 +1,6 @@
 import os
 import requests
+import hashlib
 import pandas as pd
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor
@@ -8,7 +9,14 @@ from langchain.prompts.prompt import PromptTemplate
 from langchain.sql_database import SQLDatabase
 from sqlalchemy import create_engine
 
-def download_file_in_chunks(url, filename, num_chunks=8):
+def calculate_md5(file_path):
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+def download_file_in_chunks(url, filename, expected_md5, num_chunks=8):
     try:
         response = requests.head(url)
         file_size = int(response.headers['content-length'])
@@ -35,7 +43,11 @@ def download_file_in_chunks(url, filename, num_chunks=8):
                     output_file.write(chunk_file.read())
                 os.remove(chunk_filename)
 
-        st.success("Download complete!")
+        if calculate_md5(filename) != expected_md5:
+            st.error("Downloaded file is corrupted. Please try again.")
+            os.remove(filename)
+        else:
+            st.success("Download complete and verified!")
     except Exception as e:
         st.error(f"Error downloading file: {e}")
 
@@ -105,11 +117,12 @@ def main():
         if st.button("Query"):
             model_file = "phi-3-sql.Q4_K_M.gguf"
             model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_file}"
+            expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
 
             # Download the model file if it doesn't exist
             if not os.path.exists(model_file):
                 st.write(f"Downloading {model_file}...")
-                download_file_in_chunks(model_url, model_file)
+                download_file_in_chunks(model_url, model_file, expected_md5)
 
             # Load the model
             client = load_model(model_file)
