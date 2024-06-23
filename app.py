@@ -1,15 +1,21 @@
 import os
 import requests
+import hashlib
 import pandas as pd
 import streamlit as st
+from concurrent.futures import ThreadPoolExecutor
 from langchain_community.llms import LlamaCpp
 from langchain.prompts.prompt import PromptTemplate
 from langchain.sql_database import SQLDatabase
 from sqlalchemy import create_engine
+import logging
+
+logging.basicConfig(level=logging.ERROR)  # Set logging level
 
 def download_file(url, filename):
     try:
         with requests.get(url, stream=True) as r:
+            r.raise_for_status()  # Raise error for bad status codes
             total_length = int(r.headers.get('content-length', 0))
             with open(filename, 'wb') as f:
                 downloaded = 0
@@ -20,15 +26,27 @@ def download_file(url, filename):
                         progress = downloaded / total_length
                         st.progress(progress)
         st.success("Download complete!")
+    except requests.exceptions.HTTPError as e:
+        st.exception(f"HTTP error occurred while downloading file: {e}")
     except Exception as e:
-        st.error(f"Error downloading file: {e}")
+        st.exception(f"Error downloading file: {e}")
 
 def load_model(model_file):
     try:
+        if not model_file.endswith(".gguf"):
+            st.error("Invalid model file format. Please provide a .gguf file.")
+            return None
+
+        with open(model_file, "rb") as f:
+            content = f.read()
+            if not content:
+                st.error("Model file is empty.")
+                return None
+
         client = LlamaCpp(model_path=model_file, temperature=0)
         return client
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        st.exception(f"Error loading model: {e}")
         return None
 
 def get_database():
@@ -39,11 +57,19 @@ def get_database():
         engine = create_engine(db_path)
         return db, engine
     except Exception as e:
-        st.error(f"Error connecting to database: {e}")
+        st.exception(f"Error connecting to database: {e}")
         return None, None
 
 def main():
     st.title("SQL Query Interface")
+
+    # User guide
+    with st.expander("User Guide"):
+        st.write("""
+        This interface allows you to query an SQL database using natural language.
+        - Enter your query in the input box and press 'Query' to get the results.
+        - The tables and their first 5 rows are displayed upon loading the page.
+        """)
 
     # Retrieve database and engine
     db, engine = get_database()
@@ -56,6 +82,7 @@ def main():
         if st.button("Query"):
             model_file = "phi-3-sql.Q4_K_M.gguf"
             model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_file}"
+            expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
 
             # Download the model file if it doesn't exist
             if not os.path.exists(model_file):
@@ -90,29 +117,17 @@ def main():
                     st.write("Result:")
                     st.write(df)
                 except Exception as e:
-                    st.error(f"Error executing query: {e}")
+                    st.exception(f"Error executing query: {e}")
         else:
             st.write("Please enter your query and press 'Query' to get results.")
     else:
         st.error("Database connection not established.")
 
-def display_tables_and_contents(db, engine):
-    table_names = db.get_table_names()
-    if table_names:
-        st.write("Tables:")
-        tabs = st.tabs(table_names)
-        for tab, table_name in zip(tabs, table_names):
-            with tab:
-                st.write(f"Table: {table_name}")
-                query = f"SELECT * FROM {table_name} LIMIT 5"  # Limit to 5 rows for display
-                try:
-                    with engine.connect() as connection:
-                        df = pd.read_sql_query(query, connection)
-                    st.write(df)
-                except Exception as e:
-                    st.error(f"Error retrieving data from {table_name}: {e}")
-    else:
-        st.write("No tables found in the database.")
+    # Button to clear cache
+    if st.button("Clear Cache"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.success("Cache cleared!")
 
 if __name__ == "__main__":
     main()
