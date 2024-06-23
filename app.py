@@ -103,7 +103,22 @@ def main():
 
     if db and engine:
         # Display tables and contents upon page load
-        display_tables_and_contents(db, engine)
+        table_names = db.get_table_names()
+        if table_names:
+            st.write("Tables:")
+            tabs = st.tabs(table_names)
+            for tab, table_name in zip(tabs, table_names):
+                with tab:
+                    st.write(f"Table: {table_name}")
+                    query = f"SELECT * FROM {table_name} LIMIT 5"  # Limit to 5 rows for display
+                    try:
+                        with engine.connect() as connection:
+                            df = pd.read_sql_query(query, connection)
+                        st.write(df)
+                    except Exception as e:
+                        st.error(f"Error retrieving data from {table_name}: {e}")
+        else:
+            st.write("No tables found in the database.")
 
         question = st.text_area("Enter your query:", value="Courses containing Introduction")
         if st.button("Query"):
