@@ -20,40 +20,17 @@ def calculate_md5(file_path):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
-def download_file_in_chunks(url, filename, expected_md5, num_chunks=8):
-    """Downloads a file in chunks and verifies its integrity."""
+def download_file(url, filename):
+    """Downloads a file and saves it with the given filename."""
     try:
-        response = requests.head(url)
-        file_size = int(response.headers['content-length'])
-        chunk_size = file_size // num_chunks
-
-        def download_chunk(chunk_index):
-            start = chunk_index * chunk_size
-            end = start + chunk_size - 1 if chunk_index < num_chunks - 1 else file_size - 1
-            headers = {'Range': f'bytes={start}-{end}'}
-            chunk_response = requests.get(url, headers=headers, stream=True)
-            chunk_filename = f"{filename}.part{chunk_index}"
-            with open(chunk_filename, 'wb') as f:
-                for chunk in chunk_response.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
-            return chunk_filename
-
-        with ThreadPoolExecutor(max_workers=num_chunks) as executor:
-            chunk_files = list(executor.map(download_chunk, range(num_chunks)))
-
-        with open(filename, 'wb') as output_file:
-            for chunk_filename in chunk_files:
-                with open(chunk_filename, 'rb') as chunk_file:
-                    output_file.write(chunk_file.read())
-                os.remove(chunk_filename)
-
-        if calculate_md5(filename) != expected_md5:
-            st.error("Downloaded file is corrupted. Please try again.")
-            os.remove(filename)
-        else:
-            st.success("Download complete and verified!")
-    except Exception as e:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(filename, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        st.success("Download complete!")
+    except requests.exceptions.RequestException as e:
         st.error(f"Error downloading file: {e}")
 
 @st.cache_resource(ttl=3600)  # Cache the model for an hour
@@ -122,14 +99,14 @@ def main():
 
         question = st.text_area("Enter your query:", value="Courses containing Introduction")
         if st.button("Query"):
-            model_file = "phi-3-sql.Q4_K_M.gguf"
-            model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_file}"
+            model_file = "sqlcoder.Q2_K.gguf"
+            model_url = "https://huggingface.co/TheBloke/sqlcoder-Q2_K/resolve/main/sqlcoder.Q2_K.gguf"
             expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
 
             # Download the model file if it doesn't exist
             if not os.path.exists(model_file):
                 st.write(f"Downloading {model_file}...")
-                download_file_in_chunks(model_url, model_file, expected_md5)
+                download_file(model_url, model_file)
 
             # Load the model
             client = load_model(model_file)
