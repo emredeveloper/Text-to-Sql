@@ -52,7 +52,6 @@ def download_file_in_chunks(url, filename, expected_md5, num_chunks=8):
             st.success("Download complete and verified!")
     except Exception as e:
         st.error(f"Error downloading file: {e}")
-    
 
 @st.cache_resource(ttl=3600)  # Cache the model for an hour
 def load_model(model_file):
@@ -73,18 +72,21 @@ def load_model(model_file):
     except Exception as e:
         st.error(f"Error loading model: {e}")
         return None
-
+  # Cache the database connection for an hour
 def get_database():
     """Establishes a connection to the SQLite database."""
     try:
-        db_path = "sqlite:///example.db" 
+        db_path = "sqlite:///example.db"
         db = SQLDatabase.from_uri(database_uri=db_path)
-        db._sample_rows_in_table_info = 0  
+        db._sample_rows_in_table_info = 0
         engine = create_engine(db_path)
         return db, engine
     except Exception as e:
         st.error(f"Error connecting to database: {e}")
         return None, None
+  # Cache the table names retrieval for 10 minutes
+def get_table_names(db):
+    return db.get_table_names()
 
 def main():
     st.title("SQL Query Interface")
@@ -100,6 +102,24 @@ def main():
     # Retrieve database and engine
     db, engine = get_database()
 
+    def display_tables_and_contents(db, engine):
+        table_names = get_table_names(db)
+        if table_names:
+            st.write("Tables:")
+            tabs = st.tabs(table_names)
+            for tab, table_name in zip(tabs, table_names):
+                with tab:
+                    st.write(f"Table: {table_name}")
+                    query = f"SELECT * FROM {table_name} LIMIT 5"  # Limit to 5 rows for display
+                    try:
+                        with engine.connect() as connection:
+                            df = pd.read_sql_query(query, connection)
+                        st.write(df)
+                    except Exception as e:
+                        st.error(f"Error retrieving data from {table_name}: {e}")
+        else:
+            st.write("No tables found in the database.")
+
     if db and engine:
         # Display tables and contents upon page load
         display_tables_and_contents(db, engine)
@@ -107,7 +127,7 @@ def main():
         question = st.text_area("Enter your query:", value="Courses containing Introduction")
         if st.button("Query"):
             model_file = "phi-3-sql.Q4_K_M.gguf"
-            model_url = f"https://huggingface.co/omeryentur/phi-3-sql/{model_file}"
+            model_url = f"https://huggingface.co/omeryentur/phi-3-sql/resolve/main/{model_file}"
             expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
 
             # Download the model file if it doesn't exist
