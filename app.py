@@ -104,4 +104,4 @@ def display_tables_and_contents():
         st.write("No tables found in the database.")
 
 if __name__ == "__main__":
-    main() 
+    main()
