@@ -1,8 +1,10 @@
 streamlit
 langchain
-llama-cpp-python
+langchain-ollama
 sqlite-utils
 langchain_community
-tqdm
-transformers
+pandas
+sqlalchemy
+streamlit_ace
+datetime
 
