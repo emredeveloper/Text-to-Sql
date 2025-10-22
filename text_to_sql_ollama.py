@@ -1,4 +1,3 @@
-import os
 import pandas as pd
 import streamlit as st
 from langchain_ollama import OllamaLLM
@@ -10,6 +9,8 @@ import datetime
 from streamlit_ace import st_ace
 import json
 import sqlite3
+
+from sql_utils import validate_insert_statement
 
 logging.basicConfig(level=logging.ERROR)  # Set logging level
 
@@ -25,7 +26,8 @@ def load_ollama_model(model_name="gemma3"):
         )
         return client
     except Exception as e:
-        st.error(f"Error connecting to Ollama: {e}")
+        logging.exception("Failed to connect to Ollama")
+        st.error("Error connecting to Ollama. Ensure the service is running and try again.")
         st.info("Make sure Ollama is running on your system with the gemma3 model installed.")
         return None
 
@@ -37,8 +39,19 @@ def get_database():
         engine = create_engine(db_path)
         return db, engine
     except Exception as e:
-        st.error(f"Error connecting to database: {e}")
+        logging.exception("Database connection failed")
+        st.error("Error connecting to database. Please check the database file.")
         return None, None
+
+
+def get_table_info_cached(db):
+    if "ollama_table_info" not in st.session_state:
+        try:
+            st.session_state.ollama_table_info = db.get_table_info()
+        except Exception:
+            logging.exception("Failed to retrieve table information")
+            st.session_state.ollama_table_info = ""
+    return st.session_state.ollama_table_info
 
 def export_database(db_path, export_format):
     try:
@@ -95,8 +108,9 @@ def export_database(db_path, export_format):
         
         return None, None, None
         
-    except Exception as e:
-        st.error(f"Error exporting database: {e}")
+    except Exception:
+        logging.exception("Failed to export database")
+        st.error("Error exporting database. Please try again.")
         return None, None, None
 
 def main():
@@ -176,17 +190,16 @@ def main():
             table_names = db.get_usable_table_names()
             if table_names:
                 st.write("Tables:")
-                tabs = st.tabs(table_names)
-                for tab, table_name in zip(tabs, table_names):
-                    with tab:
-                        st.write(f"Table: {table_name}")
-                        query = f"SELECT * FROM {table_name} LIMIT 5"  # Limit to 5 rows for display
-                        try:
-                            with engine.connect() as connection:
-                                df = pd.read_sql_query(query, connection)
-                            st.write(df)
-                        except Exception as e:
-                            st.error(f"Error retrieving data from {table_name}: {e}")
+                selected_table = st.selectbox("Select a table to preview", table_names, key="ollama_table_preview")
+                if selected_table:
+                    query = f"SELECT * FROM {selected_table} LIMIT 5"
+                    try:
+                        with engine.connect() as connection:
+                            df = pd.read_sql_query(query, connection)
+                        st.write(df)
+                    except Exception:
+                        logging.exception("Failed to retrieve preview for table %s", selected_table)
+                        st.error("Error retrieving table preview.")
             else:
                 st.write("No tables found in the database.")
 
@@ -199,7 +212,7 @@ def main():
                     
                     if client:
                         # Retrieve table info
-                        table_info = db.get_table_info()
+                        table_info = get_table_info_cached(db)
                         
                         # Define the SQL prompt template
                         template = """
@@ -242,7 +255,7 @@ def main():
                                     st.success("Query executed successfully!")
                                     st.write("Result:")
                                     st.write(df)
-                                    
+
                                     # Add to query history
                                     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     st.session_state.query_history.append({
@@ -252,24 +265,28 @@ def main():
                                         "result_count": len(df)
                                     })
                                 except Exception as sql_error:
-                                    st.error(f"Error executing SQL: {sql_error}")
+                                    logging.exception("Failed to execute generated SQL")
+                                    st.error("Error executing SQL. Please review the generated statement.")
                                     st.warning("The generated SQL may have syntax errors. You can try rephrasing your question.")
                         except Exception as e:
-                            st.error(f"Error generating query: {e}")
+                            logging.exception("Failed to generate SQL from Ollama")
+                            st.error("Error generating query. Please ensure Ollama is running and try again.")
 
             # Add New Data to Database section
             st.subheader("Add New Data to Database")
             new_data = st.text_area("Enter new data (SQL INSERT statement):", "")
             if st.button("Add Data"):
                 if new_data.strip():
-                    try:
-                        with engine.connect() as connection:
-                            # Using SQLAlchemy text to prevent SQL injection
-                            connection.execute(text(new_data))
-                            connection.commit()
-                        st.success("Data added successfully!")
-                    except Exception as e:
-                        st.error(f"Error adding data: {e}")
+                    if not validate_insert_statement(new_data):
+                        st.error("Only single INSERT statements are allowed in this form.")
+                    else:
+                        try:
+                            with engine.begin() as connection:
+                                connection.exec_driver_sql(new_data)
+                            st.success("Data added successfully!")
+                        except Exception:
+                            logging.exception("Failed to execute INSERT statement")
+                            st.error("Error adding data. Please verify your INSERT statement.")
                 else:
                     st.warning("Please enter a valid SQL INSERT statement.")
         
@@ -295,7 +312,7 @@ def main():
                             st.success("Query executed successfully!")
                             st.write("Result:")
                             st.write(df)
-                            
+
                             # Add to query history
                             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             st.session_state.query_history.append({
@@ -304,8 +321,9 @@ def main():
                                 "sql_query": sql_code,
                                 "result_count": len(df)
                             })
-                    except Exception as e:
-                        st.error(f"Error executing SQL: {e}")
+                    except Exception:
+                        logging.exception("Failed to execute manual SQL")
+                        st.error("Error executing SQL. Please review your statement.")
                 else:
                     st.warning("Please enter a SQL query.")
         
@@ -325,8 +343,9 @@ def main():
                                     st.success("Query executed successfully!")
                                     st.write("Result:")
                                     st.write(df)
-                            except Exception as e:
-                                st.error(f"Error executing SQL: {e}")
+                            except Exception:
+                                logging.exception("Failed to re-run query from history")
+                                st.error("Error executing SQL. Please review the stored statement.")
             else:
                 st.info("No queries in history yet.")
 
@@ -391,8 +410,9 @@ def main():
                     connection.commit()
                 
                 st.success("Example database created successfully! Please refresh the page.")
-            except Exception as e:
-                st.error(f"Error creating database: {e}")
+            except Exception:
+                logging.exception("Failed to create example database")
+                st.error("Error creating database. Please check file permissions and try again.")
 
 if __name__ == "__main__":
     main()
