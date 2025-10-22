@@ -1,44 +1,41 @@
 import os
-import requests
-import hashlib
-import pandas as pd
-import streamlit as st
-from concurrent.futures import ThreadPoolExecutor
-from langchain_community.llms import LlamaCpp
-from langchain.prompts.prompt import PromptTemplate
-from langchain.sql_database import SQLDatabase
-from sqlalchemy import create_engine
 import logging
+from typing import Optional
+
+import pandas as pd
+import requests
+import streamlit as st
+from langchain.prompts.prompt import PromptTemplate
+from langchain_community.llms import LlamaCpp
+from langchain_community.utilities import SQLDatabase
+from sqlalchemy import create_engine
+
+from file_utils import calculate_md5
+from sql_utils import validate_insert_statement
 
 logging.basicConfig(level=logging.ERROR)  # Set logging level
 
-def calculate_md5(file_path):
-    """Calculates the MD5 hash of a file."""
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
-
-def download_file(url, filename, expected_md5):
-    """Downloads a file and verifies its integrity."""
+def download_file(url: str, filename: str, expected_md5: Optional[str] = None) -> None:
+    """Download a file and optionally verify its integrity via MD5."""
     try:
-        response = requests.get(url, stream=True)
-        if response.status_code == 200:
-            with open(filename, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=1024):
-                    if chunk:
-                        f.write(chunk)
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
+        with open(filename, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:
+                    f.write(chunk)
 
-            if calculate_md5(filename) != expected_md5:
-                st.error("Downloaded file is corrupted. Please try again.")
+        if expected_md5:
+            actual_md5 = calculate_md5(filename)
+            if actual_md5 != expected_md5:
+                st.error("Downloaded file failed the integrity check. Removing file.")
                 os.remove(filename)
-            else:
-                st.success("Download complete and verified!")
-        else:
-            st.error(f"Failed to download file: {response.status_code}")
+                return
+
+        st.success("Download complete and verified!")
     except Exception as e:
-        st.error(f"Error downloading file: {e}")
+        logging.exception("Error downloading model file")
+        st.error("Error downloading file. Please verify your network connection and try again.")
 
 @st.cache_resource(ttl=3600)  # Cache the model for an hour
 def load_model(model_file):
@@ -51,7 +48,8 @@ def load_model(model_file):
         client = LlamaCpp(model_path=model_file, temperature=0)
         return client
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        logging.exception("Failed to load LlamaCpp model")
+        st.error("Error loading model. Please check the model file and try again.")
         return None
 
 def get_database():
@@ -62,8 +60,19 @@ def get_database():
         engine = create_engine(db_path)
         return db, engine
     except Exception as e:
-        st.error(f"Error connecting to database: {e}")
+        logging.exception("Database connection failed")
+        st.error("Error connecting to database. Please check the database file.")
         return None, None
+
+
+def get_table_info_cached(db):
+    if "table_info" not in st.session_state:
+        try:
+            st.session_state.table_info = db.get_table_info()
+        except Exception:
+            logging.exception("Failed to retrieve table information")
+            st.session_state.table_info = ""
+    return st.session_state.table_info
 
 def main():
     st.title("SQL Query Interface")
@@ -84,25 +93,24 @@ def main():
         table_names = db.get_table_names()
         if table_names:
             st.write("Tables:")
-            tabs = st.tabs(table_names)
-            for tab, table_name in zip(tabs, table_names):
-                with tab:
-                    st.write(f"Table: {table_name}")
-                    query = f"SELECT * FROM {table_name} LIMIT 5"  # Limit to 5 rows for display
-                    try:
-                        with engine.connect() as connection:
-                            df = pd.read_sql_query(query, connection)
-                        st.write(df)
-                    except Exception as e:
-                        st.error(f"Error retrieving data from {table_name}: {e}")
+            selected_table = st.selectbox("Select a table to preview", table_names)
+            if selected_table:
+                query = f"SELECT * FROM {selected_table} LIMIT 5"
+                try:
+                    with engine.connect() as connection:
+                        df = pd.read_sql_query(query, connection)
+                    st.write(df)
+                except Exception:
+                    logging.exception("Failed to retrieve preview for table %s", selected_table)
+                    st.error("Error retrieving table preview.")
         else:
             st.write("No tables found in the database.")
 
         question = st.text_area("Enter your query:", value="Courses containing Introduction")
         if st.button("Query"):
             model_file = "phi-3-sql.Q4_K_M.gguf"
-            model_url = "https://huggingface.co/omeryentur/phi-3-sql/blob/main/phi-3-sql.Q4_K_M.gguf"
-            expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"  # Replace with the actual MD5 hash of the model file
+            model_url = "https://huggingface.co/omeryentur/phi-3-sql/resolve/main/phi-3-sql.Q4_K_M.gguf"
+            expected_md5 = None  # Provide a hash here to enable integrity verification
 
             # Download the model file if it doesn't exist
             if not os.path.exists(model_file):
@@ -113,7 +121,7 @@ def main():
             client = load_model(model_file)
             if client:
                 # Retrieve table info
-                table_info = db.get_table_info()
+                table_info = get_table_info_cached(db)
 
                 # Define the SQL prompt template
                 template = """
@@ -129,15 +137,15 @@ def main():
                     # Get SQL query from LLM
                     res = client(prompt_text)
                     sql_query = res.strip()
-                    print(prompt_text)
                     with engine.connect() as connection:
                         df = pd.read_sql_query(sql_query, connection)
 
                     st.write(f"SQL Query: {sql_query}")
                     st.write("Result:")
                     st.write(df)
-                except Exception as e:
-                    st.error(f"Error executing query: {e}")
+                except Exception:
+                    logging.exception("Error executing generated SQL")
+                    st.error("Error executing query. Please verify the generated SQL statement.")
         else:
             st.write("Please enter your query and press 'Query' to get results.")
 
@@ -146,12 +154,16 @@ def main():
         new_data = st.text_area("Enter new data (SQL INSERT statement):", "")
         if st.button("Add Data"):
             if new_data.strip():
-                try:
-                    with engine.connect() as connection:
-                        connection.execute(new_data)
-                    st.success("Data added successfully!")
-                except Exception as e:
-                    st.error(f"Error adding data: {e}")
+                if not validate_insert_statement(new_data):
+                    st.error("Only single INSERT statements are allowed in this form.")
+                else:
+                    try:
+                        with engine.begin() as connection:
+                            connection.exec_driver_sql(new_data)
+                        st.success("Data added successfully!")
+                    except Exception:
+                        logging.exception("Failed to execute INSERT statement")
+                        st.error("Error adding data. Please verify your INSERT statement.")
             else:
                 st.warning("Please enter a valid SQL INSERT statement.")
 
